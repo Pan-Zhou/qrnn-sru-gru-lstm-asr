@@ -89,9 +89,11 @@ def train_model(epoch, model, train_reader):
     lr = args.lr
 
     total_loss = 0.0
-    criterion = nn.CrossEntropyLoss(size_average=False)
+    criterion = nn.CrossEntropyLoss(size_average=True)
     hidden = model.init_hidden(batch_size)
     i=0
+    running_acc=0
+    total_frame=0
     while True:
         feat,label,length = train_reader.load_next_nstreams()
         if length is None or label.shape[0]<args.batch_size:
@@ -99,6 +101,7 @@ def train_model(epoch, model, train_reader):
         else:
             #print label.shape
             x, y =  Variable(torch.from_numpy(feat)).cuda(), Variable(torch.from_numpy(label).long()).cuda()
+            hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
 
@@ -106,7 +109,11 @@ def train_model(epoch, model, train_reader):
             output, hidden = model(x, hidden,length)
             assert x.size(0) == batch_size
             y=pack_padded_sequence(y,length,batch_first=True)
-            loss = criterion(output, y.data) / x.size(0)
+            loss = criterion(output, y.data)#/ output.size(0)
+            #print y.data
+            #print output
+            _,predict = torch.max(output,1)
+            correct = (predict == y.data).sum()
             loss.backward()
 
             torch.nn.utils.clip_grad_norm(model.parameters(), args.clip_grad)
@@ -120,38 +127,54 @@ def train_model(epoch, model, train_reader):
                 sys.exit(0)
                 return
 
-            total_loss += loss.data[0] / x.size(1)
+            total_loss += loss.data[0] * output.size(0)
+            running_acc += correct.data[0]
+            total_frame += output.size(0)
+            #print running_acc*1.0/total_frame
             i+=1
             if i%10 == 0:
-                sys.stdout.write("time:{}, Epoch={},batch={},loss={:.4f}\n".format(datetime.now(),epoch,i,total_loss/i))
+                sys.stdout.write("time:{}, Epoch={},trbatch={},loss={:.4f},tracc={:.4f}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
+                        running_acc*1.0/total_frame))
                 sys.stdout.flush()
 
-    return (total_loss/i)
+    return total_loss/total_frame,running_acc*1.0/total_frame
 
-def eval_model(model, valid_reader):
+def eval_model(epoch,model, valid_reader):
     model.eval()
     args = model.args
     valid_reader.initialize_read(True)
+    batch_size = args.batch_size
     total_loss = 0.0
     #unroll_size = model.args.unroll_size
-    criterion = nn.CrossEntropyLoss(size_average=False)
+    criterion = nn.CrossEntropyLoss(size_average=True)
     hidden = model.init_hidden(batch_size)
     i=0
+    total_frame=0
+    cvacc=0
     while True:
         feat,label,length = valid_reader.load_next_nstreams()
         if length is None or label.shape[0]<args.batch_size:
             break
         else:
             x, y = Variable(torch.from_numpy(feat), volatile=True).cuda(), Variable(torch.from_numpy(label).long()).cuda()
+            hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
-            output, hidden = model(x, hidden)
+            output, hidden = model(x, hidden,length)
             y=pack_padded_sequence(y,length,batch_first=True)
-            loss = criterion(output, y) / x.size(0)
-            total_loss += loss.data[0]
+            loss = criterion(output, y.data)#/x.size(0)
+            _,predict=torch.max(output,1)
+            correct=(predict == y.data).sum()
+            total_frame+= output.size(0)
+            total_loss += loss.data[0]*output.size(0)
+            cvacc +=correct.data[0]
             i+=1
-    avg_loss = total_loss / i
-    return avg_loss
+            if i%10 == 0:
+                sys.stdout.write("time:{}, Epoch={},cvbatch={},loss={:.4f},cvacc={:.4f}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
+                        cvacc*1.0/total_frame))
+                sys.stdout.flush()
+    avg_loss = total_loss / total_frame
+    return avg_loss,cvacc*1.0/total_frame
 
 def main(args):
     train_read_opts={'label':args.trainlab,'lcxt':args.lcxt,'rcxt':args.rcxt,'num_streams':args.batch_size,'skip_frame':args.skipframe}
@@ -174,14 +197,16 @@ def main(args):
         start_time = time.time()
         if args.lr_decay_epoch>0 and epoch>=args.lr_decay_epoch:
             args.lr *= args.lr_decay
-        train_loss = train_model(epoch, model, kaldi_io_tr)
-        dev_loss = eval_model(model, kaldi_io_dev)
-        sys.stdout.write("Epoch={}  lr={:.4f}  train_loss={:.4f}  dev_loss={:.4f}"
+        train_loss,tracc = train_model(epoch, model, kaldi_io_tr)
+        dev_loss,devacc = eval_model(epoch,model, kaldi_io_dev)
+        sys.stdout.write("Epoch={}  lr={:.4f}  train_loss={:.4f}  dev_loss={:.4f}  tracc={:.4f}  validacc={:.4f}"
                 "\t[{:.4f}m]\n".format(
             epoch,
             args.lr,
             train_loss,
             dev_loss,
+            tracc,
+            devacc,
             (time.time()-start_time)/60.0
         ))
         model.print_pnorm()
@@ -225,7 +250,7 @@ if __name__ == "__main__":
         help="intial bias of highway gates",
     )
     argparser.add_argument("--depth", type=int, default=6)
-    argparser.add_argument("--lr", type=float, default=1.0)
+    argparser.add_argument("--lr", type=float, default=0.1)
     argparser.add_argument("--lr_decay", type=float, default=0.98)
     argparser.add_argument("--lr_decay_epoch", type=int, default=175)
     argparser.add_argument("--weight_decay", type=float, default=1e-5)
