@@ -32,13 +32,15 @@ class Model(nn.Module):
         if args.lstm:
             self.rnn = nn.LSTM(self.n_d, self.n_cell,
                 self.depth,
-                dropout = args.rnn_dropout
+                dropout = args.rnn_dropout,
+                batch_first = True
             )
         else:
             self.rnn = MF.SRU(self.n_d, self.n_cell, self.depth,
                 dropout = args.rnn_dropout,
                 rnn_dropout = args.rnn_dropout,
-                use_tanh = 0
+                use_tanh = 0,
+                batch_first = True
             )
         self.output_layer = nn.Linear(self.n_cell, self.n_V)
 
@@ -56,10 +58,8 @@ class Model(nn.Module):
                 p.data.zero_()
 
     def forward(self, x, hidden,lens):
-        x=pack_padded_sequence(x,lens,batch_first=True)
         rnnout, hidden = self.rnn(x, hidden)
-        output,_ = pad_packed_sequence(rnnout,batch_first=True)
-        output = self.drop(output)
+        output = self.drop(rnnout)
         output = output.view(-1, output.size(2))
         output = self.output_layer(output)
         return output, hidden
@@ -89,8 +89,8 @@ def train_model(epoch, model, train_reader):
     lr = args.lr
 
     total_loss = 0.0
-    criterion = nn.CrossEntropyLoss(size_average=True,ignore_index=-1)
     hidden = model.init_hidden(batch_size)
+    logsftx = torch.nn.LogSoftmax()
     i=0
     running_acc=0
     total_frame=0
@@ -107,13 +107,15 @@ def train_model(epoch, model, train_reader):
 
             model.zero_grad()
             output, hidden = model(x, hidden,length)
-            assert x.size(0) == batch_size
-            #y=pack_padded_sequence(y,length,batch_first=True)
-            loss = criterion(output, y.view(-1))#/ output.size(0)
-            #print y.data
-            #print output
             _,predict = torch.max(output,1)
             correct = (predict == y.view(-1)).sum()
+            assert x.size(0) == batch_size
+            output = logsftx(output)
+            mask = (y>=0)
+            labselect = y + (y<0).long()
+            select =torch.gather(output,1,labselect.view(-1,1))
+            losses = torch.masked_select(select,mask.view(-1,1))
+            loss = torch.mean(losses)
             loss.backward()
 
             torch.nn.utils.clip_grad_norm(model.parameters(), args.clip_grad)
@@ -146,8 +148,8 @@ def eval_model(epoch,model, valid_reader):
     batch_size = args.batch_size
     total_loss = 0.0
     #unroll_size = model.args.unroll_size
-    criterion = nn.CrossEntropyLoss(size_average=True,ignore_index=-1)
     hidden = model.init_hidden(batch_size)
+    logsftx = torch.nn.LogSoftmax()
     i=0
     total_frame=0
     cvacc=0
@@ -161,10 +163,15 @@ def eval_model(epoch,model, valid_reader):
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
             output, hidden = model(x, hidden,length)
-            y=pack_padded_sequence(y,length,batch_first=True)
-            loss = criterion(output, y.view(-1))#/x.size(0)
             _,predict=torch.max(output,1)
             correct=(predict == y.view(-1)).sum()
+            output = logsftx(output)
+            mask= (y>=0)
+            labselect = y + (y<0).long()
+            select = torch.gather(output,1,labselect.view(-1,1))
+            losses = torch.masked_select(select,mask.view(-1,1))
+            loss = torch.mean(losses)
+
             total_frame+= sum(length)
             total_loss += loss.data[0]*sum(length)
             cvacc +=correct.data[0]
