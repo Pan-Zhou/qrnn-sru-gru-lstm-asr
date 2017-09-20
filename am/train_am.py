@@ -58,9 +58,9 @@ class Model(nn.Module):
     def forward(self, x, hidden,lens):
         x=pack_padded_sequence(x,lens,batch_first=True)
         rnnout, hidden = self.rnn(x, hidden)
-        #output,_ = pad_packed_sequence(output)
-        output = self.drop(rnnout.data)
-        #output = output.view(-1, output.size(2))
+        output,_ = pad_packed_sequence(rnnout,batch_first=True)
+        output = self.drop(output)
+        output = output.view(-1, output.size(2))
         output = self.output_layer(output)
         return output, hidden
 
@@ -89,7 +89,7 @@ def train_model(epoch, model, train_reader):
     lr = args.lr
 
     total_loss = 0.0
-    criterion = nn.CrossEntropyLoss(size_average=True)
+    criterion = nn.CrossEntropyLoss(size_average=True,ignore_index=-1)
     hidden = model.init_hidden(batch_size)
     i=0
     running_acc=0
@@ -108,12 +108,12 @@ def train_model(epoch, model, train_reader):
             model.zero_grad()
             output, hidden = model(x, hidden,length)
             assert x.size(0) == batch_size
-            y=pack_padded_sequence(y,length,batch_first=True)
-            loss = criterion(output, y.data)#/ output.size(0)
+            #y=pack_padded_sequence(y,length,batch_first=True)
+            loss = criterion(output, y.view(-1))#/ output.size(0)
             #print y.data
             #print output
             _,predict = torch.max(output,1)
-            correct = (predict == y.data).sum()
+            correct = (predict == y.view(-1)).sum()
             loss.backward()
 
             torch.nn.utils.clip_grad_norm(model.parameters(), args.clip_grad)
@@ -127,9 +127,9 @@ def train_model(epoch, model, train_reader):
                 sys.exit(0)
                 return
 
-            total_loss += loss.data[0] * output.size(0)
+            total_loss += loss.data[0] * sum(length)
             running_acc += correct.data[0]
-            total_frame += output.size(0)
+            total_frame += sum(length)
             #print running_acc*1.0/total_frame
             i+=1
             if i%10 == 0:
@@ -146,7 +146,7 @@ def eval_model(epoch,model, valid_reader):
     batch_size = args.batch_size
     total_loss = 0.0
     #unroll_size = model.args.unroll_size
-    criterion = nn.CrossEntropyLoss(size_average=True)
+    criterion = nn.CrossEntropyLoss(size_average=True,ignore_index=-1)
     hidden = model.init_hidden(batch_size)
     i=0
     total_frame=0
@@ -162,11 +162,11 @@ def eval_model(epoch,model, valid_reader):
                 else Variable(hidden.data)
             output, hidden = model(x, hidden,length)
             y=pack_padded_sequence(y,length,batch_first=True)
-            loss = criterion(output, y.data)#/x.size(0)
+            loss = criterion(output, y.view(-1))#/x.size(0)
             _,predict=torch.max(output,1)
-            correct=(predict == y.data).sum()
-            total_frame+= output.size(0)
-            total_loss += loss.data[0]*output.size(0)
+            correct=(predict == y.view(-1)).sum()
+            total_frame+= sum(length)
+            total_loss += loss.data[0]*sum(length)
             cvacc +=correct.data[0]
             i+=1
             if i%10 == 0:
