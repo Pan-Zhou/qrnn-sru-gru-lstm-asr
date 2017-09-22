@@ -47,7 +47,6 @@ class Model(nn.Module):
             self.rnn.set_bias(args.bias)
 
     def init_weights(self):
-        #val_range = (6.0/self.n_d+self.n_cell)**0.5
         val_range =0.05 
         for p in self.parameters():
             if p.dim() > 1:  # matrix
@@ -83,9 +82,7 @@ def train_model(epoch, model, train_reader):
     args = model.args
     
     train_reader.initialize_read(True)
-    #unroll_size = args.unroll_size
     batch_size = args.batch_size
-    #N = (len(train[0])-1)//unroll_size + 1
     lr = args.lr
 
     total_loss = 0.0
@@ -99,7 +96,6 @@ def train_model(epoch, model, train_reader):
         if length is None or label.shape[0]<args.batch_size:
             break
         else:
-            #print label.shape
             x, y =  Variable(torch.from_numpy(feat)).cuda(), Variable(torch.from_numpy(label).long()).cuda()
             hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
@@ -108,10 +104,7 @@ def train_model(epoch, model, train_reader):
             model.zero_grad()
             output, hidden = model(x, hidden,length)
             assert x.size(0) == batch_size
-            #y=pack_padded_sequence(y,length,batch_first=True)
-            loss = criterion(output, y.view(-1))#/ output.size(0)
-            #print y.data
-            #print output
+            loss = criterion(output, y.view(-1))
             _,predict = torch.max(output,1)
             correct = (predict == y.view(-1)).sum()
             loss.backward()
@@ -161,7 +154,6 @@ def eval_model(epoch,model, valid_reader):
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
             output, hidden = model(x, hidden,length)
-            y=pack_padded_sequence(y,length,batch_first=True)
             loss = criterion(output, y.view(-1))#/x.size(0)
             _,predict=torch.max(output,1)
             correct=(predict == y.view(-1)).sum()
@@ -240,7 +232,7 @@ if __name__ == "__main__":
     argparser.add_argument("--max_epoch", type=int, default=300)
     argparser.add_argument("--feadim", type=int, default=40)
     argparser.add_argument("--hidnum", type=int, default=512)
-    argparser.add_argument("--dropout", type=float, default=0.7,
+    argparser.add_argument("--dropout", type=float, default=0.5,
         help="dropout of word embeddings and softmax output"
     )
     argparser.add_argument("--rnn_dropout", type=float, default=0.2,

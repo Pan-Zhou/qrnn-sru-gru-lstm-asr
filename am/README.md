@@ -1,7 +1,5 @@
 
 Code used for neural acoustic modeling. 
-In the experiments, we used identity activation `--use_tanh 0` and set highway gate bias to `-3`.
-These choices are found to produce better results.
 
 ## How to run
   - Prepare feathure and label file in kaldi format
@@ -17,10 +15,14 @@ These choices are found to produce better results.
     python train_am.py --help               # see all running options
   
     python train_am.py 
-		--train train.scp    # run with default options, 6 SRU layers  
-		--dev valid.scp
-		--trainlab tr.labels
-		--devlab cv.labels
+		--train data/cv.scp     
+		--dev data/cv.scp
+		--trainlab data/sort_cv.labels
+		--devlab data/sort_cv.labels
+		--lr 0.05
+		--max_epoch 10
+		--lr_decay_epoch 4
+		--batch_size 1
 
   ```
   
