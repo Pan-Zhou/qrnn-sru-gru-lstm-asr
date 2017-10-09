@@ -22,6 +22,12 @@ from io_func import smart_open, preprocess_feature_and_label, shuffle_feature_an
 from io_func.kaldi_io_parallel import KaldiDataReadParallel
 
 def CELOSS(output,label):
+    """
+    compute cross entropy loss with net output and label
+    ouput: linear before softmax,(N*T, dim) tensor
+    label: (T,N) tensor, with -1 padded for padding frames
+    return: masked average ce loss
+    """
     mask = (label>=0)
     output =F.log_softmax(output)
     labselect = label + (label<0).long()
@@ -29,76 +35,6 @@ def CELOSS(output,label):
     losses = mask.float().cuda().view(-1,1)*select
     loss = torch.sum(losses)/torch.sum(mask.float())
     return loss
-
-def sequence_mask(sequence_length, max_len=None):
-    if max_len is None:
-        max_len = sequence_length.data.max()
-    batch_size = sequence_length.size(0)
-    seq_range = torch.from_numpy(np.arange(0, max_len)).long()
-    seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
-    seq_range_expand = Variable(seq_range_expand)
-    if sequence_length.is_cuda:
-        seq_range_expand = seq_range_expand.cuda()
-    seq_length_expand = (sequence_length.unsqueeze(1)
-                         .expand_as(seq_range_expand))
-    return seq_range_expand < seq_length_expand
-
-
-def compute_loss(logits, target, length):
-    length = Variable(torch.LongTensor(length)).cuda()
-
-    """
-    Args:
-        logits: A Variable containing a FloatTensor of size
-            (batch, max_len, num_classes) which contains the
-            unnormalized probability for each class.
-        target: A Variable containing a LongTensor of size
-            (batch, max_len) which contains the index of the true
-            class for each corresponding step.
-        length: A Variable containing a LongTensor of size (batch,)
-            which contains the length of each data in a batch.
-    Returns:
-        loss: An average loss value masked by the length.
-    """
-
-    # logits_flat: (batch * max_len, num_classes)
-    logits_flat = logits.view(-1, logits.size(-1))
-    # log_probs_flat: (batch * max_len, num_classes)
-    log_probs_flat = F.log_softmax(logits_flat)
-    # target_flat: (batch * max_len, 1)
-    target_flat = target.view(-1, 1)
-    # losses_flat: (batch * max_len, 1)
-    losses_flat = -torch.gather(log_probs_flat, dim=1, index=target_flat)
-    # losses: (batch, max_len)
-    losses = losses_flat.view(*target.size())
-    # mask: (batch, max_len)
-    mask = sequence_mask(sequence_length=length)
-    losses = losses * mask.float()
-    loss = losses.sum() / length.float().sum()
-    return loss
-
-
-def padding(data, max_seq_len, value, data_shape, dtype=np.float32):
-    seq_len = data.shape[0]
-    shape = data.shape
-    if seq_len <= max_seq_len:
-        data_pad = np.zeros(shape, dtype=dtype)
-        interpNum = max_seq_len - seq_len
-        data_pad[0:seq_len] = data
-        zero_mat = np.full(data_shape, value)
-        for i in range(seq_len, max_seq_len):
-            data_pad[i] = zero_mat
-    else:
-        data_pad = data[0:max_seq_len]
-    return data_pad
-
-def pad_seq(seq, max_length, value):
-    pad_length = max_length - len(seq)
-    if pad_length > 0:
-        pad = np.array([value for i in range(pad_length)], dtype=np.int32)
-        for ele in pad:
-            seq.append(ele)
-    return seq
 
 class Model(nn.Module):
     def __init__(self, args):
@@ -135,9 +71,9 @@ class Model(nn.Module):
                 p.data.zero_()
 
     def forward(self, x, hidden,lens):
-        #x=pack_padded_sequence(x, lens, batch_first=True)
+        ##x=pack_padded_sequence(x, lens, batch_first=True)
         rnnout, hidden = self.rnn(x, hidden)
-        #output,_ = pad_packed_sequence(rnnout, batch_first=True) 
+        ##output,_ = pad_packed_sequence(rnnout, batch_first=True) 
         output = self.drop(rnnout)
         output = output.view(-1, output.size(2))
         output = self.output_layer(output)
@@ -168,35 +104,32 @@ def train_model(epoch, model, train_reader, optimizer):
     lr = args.lr
 
     total_loss = 0.0
-    #criterion = nn.CrossEntropyLoss(size_average=False,ignore_index=-1)
     hidden = model.init_hidden(batch_size)
     i=0
     running_acc=0
     total_frame=0
     while True:
+        #####batch major tensor,(batch,maxT,feadim),(batch,maxT)
         feat,label,length = train_reader.load_next_nstreams()
         if length is None or label.shape[0]<args.batch_size:
             break
-        else: 
+        else:
+            ###transpose to time major for rnn training
             xt=np.copy(np.transpose(feat,(1,0,2)))
             yt=np.copy(np.transpose(label,(1,0)))
             x,y = torch.from_numpy(xt),torch.from_numpy(yt).long()
             x, y = Variable(x.contiguous()).cuda(),Variable(y.contiguous()).cuda()
-            correct = 0
-            #x, y =  Variable(torch.from_numpy(feat[:,:,:])).cuda(), Variable(torch.from_numpy(label[:,:]).long()).cuda()
             hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
 
-            optimizer.zero_grad()
             output, hidden = model(x, hidden,length)
-            #loss = compute_loss(output, y, length)
             _,predict = torch.max(output,1)
             predict_data = ((predict.data).cpu().numpy())
             correct = np.sum(predict_data == yt.reshape(-1))
             
+            optimizer.zero_grad()
             loss= CELOSS(output,y)
-            #assert x.size(0) == batch_size
             loss.backward()
             optimizer.step()
 
@@ -217,10 +150,6 @@ def train_model(epoch, model, train_reader, optimizer):
             running_acc += correct
             total_frame += sum(length)
             i+=1
-            if i%5000 == 0:
-                for p in model.parameters():
-                    sys.stdout.write("maxwts={},minwts={}\n".format(torch.max(p).data[0],torch.min(p).data[0]))
-                sys.stdout.flush()
             if i%10 == 0:
                 sys.stdout.write("train: time:{}, Epoch={},trbatch={},loss={:.4f},tracc={:.4f}, batchacc={:.4f}, correct={}, total={}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
                         running_acc*1.0/total_frame, float(correct)/sum(length), correct, sum(length)))
@@ -234,7 +163,6 @@ def eval_model(epoch,model, valid_reader):
     valid_reader.initialize_read(True)
     batch_size = args.batch_size
     total_loss = 0.0
-    #criterion = nn.CrossEntropyLoss(size_average=True,ignore_index=-1)
     hidden = model.init_hidden(batch_size)
     i=0
     total_frame=0
@@ -248,7 +176,6 @@ def eval_model(epoch,model, valid_reader):
             yt=np.copy(np.transpose(label,(1,0)))
             x,y = torch.from_numpy(xt),torch.from_numpy(yt).long()
             x, y = Variable(x.contiguous()).cuda(),Variable(y.contiguous()).cuda()
-            correct = 0
             #x, y =  Variable(torch.from_numpy(feat[:,:,:])).cuda(), Variable(torch.from_numpy(label[:,:]).long()).cuda()
             hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
@@ -318,7 +245,7 @@ def main(args):
             sys.stdout.flush()
         else:
             unchanged += 1
-        if unchanged >= 30: break
+        if unchanged >= 5: break
         sys.stdout.write("\n")
 
 if __name__ == "__main__":

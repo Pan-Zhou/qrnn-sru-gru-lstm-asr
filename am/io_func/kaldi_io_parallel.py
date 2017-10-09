@@ -153,15 +153,15 @@ class KaldiDataReadParallel(object):
             nstreams += 1
 
         #sort in decrease order
-        feat_mat.sort(key=lambda x:x.size,reverse=True)
-        length.sort(reverse=True)
-        label.sort(key=lambda x:x.size,reverse=True)
+        #feat_mat.sort(key=lambda x:x.size,reverse=True)
+        #length.sort(reverse=True)
+        #label.sort(key=lambda x:x.size,reverse=True)
         # zero fill
         i = 0
         while i < nstreams:
             if max_frame_num != length[i]:
                 feat_mat[i] = numpy.vstack((feat_mat[i], numpy.zeros((max_frame_num-length[i], feat_mat[i].shape[1]),dtype=numpy.float32)))
-                label[i] = numpy.hstack((label[i], numpy.zeros((max_frame_num-length[i]),dtype=numpy.int32)))
+                label[i] = numpy.hstack((label[i], numpy.zeros((max_frame_num-length[i]),dtype=numpy.int32)-1))
             i += 1
 
         if feat_mat.__len__():
