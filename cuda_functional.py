@@ -431,7 +431,7 @@ class SRUCell(nn.Module):
         self.use_tanh = use_tanh
 
         out_size = n_out*2 if bidirectional else n_out
-        k = 4 if n_in != out_size else 3
+        k = 4 if n_in != out_size else 4
         self.size_per_dir = n_out*k
         self.weight = nn.Parameter(torch.Tensor(
             n_in,
