@@ -219,12 +219,37 @@ def main(args):
 
     unchanged = 0
     best_dev = 1e+8
-    for epoch in range(args.max_epoch):
+    save_folder = args.save_folder
+    try:
+        os.makedirs(save_folder)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            print('Directory already exists.')
+        else:
+            raise
+
+    if args.resume:
+        if os.path.isfile(args.resume):
+            checkpoint = torch.load(args.resume)
+            model.load_state_dict(checkpoit['state_dict'])
+            optimizer.load_state_dict(checkpoit['optim_dict'])
+            start_epoch = checkpoit['epoch']
+            print("=> loaded checkpoint '{}' (epoch {})".format(args.resume,checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}'".format(args.resume))
+            start_epoch = 0
+    for epoch in range(start_epoch, args.max_epoch):
         start_time = time.time()
         if args.lr_decay_epoch>0 and epoch>=args.lr_decay_epoch:
             args.lr *= args.lr_decay
         
         train_loss,tracc = train_model(epoch, model, kaldi_io_tr, optimizer)
+        
+        #save checkpoit
+        if args.checkpoint:
+            file_path = '{}/am_{}.pth.tar'.format(save_folder, epoch + 1)
+            torch.save({'epoch':epoch+1,'state_dict':model.state_dict(),'optim_dict':optimizer.state_dict()},file_path)
+            print('Saving checkpoint model to %s' % file_path)
         cvstart_time = time.time()
         dev_loss,devacc = eval_model(epoch,model, kaldi_io_dev)
         sys.stdout.write("Epoch={}  lr={:.4f}  train_loss={:.4f}  dev_loss={:.4f}  tracc={:.4f}  validacc={:.4f}"
@@ -239,10 +264,14 @@ def main(args):
         ))
         model.print_pnorm()
         sys.stdout.flush()
-
+        
+        #save best model
         if dev_loss < best_dev:
             unchanged = 0
             best_dev = dev_loss
+            file_path = os.path.join(save_folder, args.model_path)
+            torch.save({'epoch':epoch+1,'state_dict':model.state_dict(),'optim_dict':optimizer.state_dict()}),file_path)
+            print("Find better validated model, saving to {}".format(file_path)
             start_time = time.time()
             sys.stdout.flush()
         else:
@@ -282,7 +311,14 @@ if __name__ == "__main__":
     argparser.add_argument("--lr_decay_epoch", type=int, default=175)
     argparser.add_argument("--weight_decay", type=float, default=1e-5)
     argparser.add_argument("--clip_grad", type=float, default=5)
-
+    argparser.add_argument("--checkpoint", dest="checkpoint", action="store_true",
+                                help="Enables checkpoint saving of model")
+    argparser.add_argument('--model_path', default='final.pth.tar',
+                            help='Location to save best validation model')
+    argparser.add_argument('--save_folder', default='models/',
+                                help='Location to save epoch models')
+    argparser.add_argument('--resume', default='',
+                            help='restore from checkpoint model')
     args = argparser.parse_args()
     print (args)
     main(args)
