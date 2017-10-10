@@ -118,18 +118,18 @@ def train_model(epoch, model, train_reader, optimizer):
             xt=np.copy(np.transpose(feat,(1,0,2)))
             yt=np.copy(np.transpose(label,(1,0)))
             x,y = torch.from_numpy(xt),torch.from_numpy(yt).long()
-            x, y = Variable(x.contiguous()).cuda(),Variable(y.contiguous()).cuda()
+            dx, dy = Variable(x).cuda(),Variable(y).cuda()
             hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
 
-            output, hidden = model(x, hidden,length)
+            output, hidden = model(dx, hidden,length)
             _,predict = torch.max(output,1)
             predict_data = ((predict.data).cpu().numpy())
             correct = np.sum(predict_data == yt.reshape(-1))
             
             optimizer.zero_grad()
-            loss= CELOSS(output,y)
+            loss= CELOSS(output,dy)
             loss.backward()
             optimizer.step()
 
@@ -149,6 +149,7 @@ def train_model(epoch, model, train_reader, optimizer):
             total_loss += loss.data[0] * sum(length) 
             running_acc += correct
             total_frame += sum(length)
+            del loss,output,predict,hidden,dx,dy
             i+=1
             if i%10 == 0:
                 sys.stdout.write("train: time:{}, Epoch={},trbatch={},loss={:.4f},tracc={:.4f}, batchacc={:.4f}, correct={}, total={}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
@@ -175,22 +176,23 @@ def eval_model(epoch,model, valid_reader):
             xt=np.copy(np.transpose(feat,(1,0,2)))
             yt=np.copy(np.transpose(label,(1,0)))
             x,y = torch.from_numpy(xt),torch.from_numpy(yt).long()
-            x, y = Variable(x.contiguous()).cuda(),Variable(y.contiguous()).cuda()
+            dx, dy = Variable(x,volatile=True).cuda(),Variable(y).cuda()
             #x, y =  Variable(torch.from_numpy(feat[:,:,:])).cuda(), Variable(torch.from_numpy(label[:,:]).long()).cuda()
             hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
 
-            output, hidden = model(x, hidden,length)
+            output, hidden = model(dx, hidden,length)
             _,predict = torch.max(output,1)
             predict_data = ((predict.data).cpu().numpy())
             correct = np.sum(predict_data == yt.reshape(-1))
             
-            loss = CELOSS(output,y)
+            loss = CELOSS(output,dy)
             
             total_frame+= sum(length)
             total_loss += loss.data[0]*sum(length)
             cvacc += correct
+            del loss,output,predict,hidden,dx,dy
             i+=1
             if i%10 == 0:
                 sys.stdout.write("valid: time:{}, Epoch={},cvbatch={},loss={:.4f},cvacc={:.4f}, batchacc={:.4f}, correct={}, total={}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
