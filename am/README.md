@@ -16,11 +16,10 @@ These choices are found to produce better results.
   ```
     python train_am.py --help               # see all running options
   
-    python train_am.py 
-		--train train.scp    # run with default options, 6 SRU layers  
-		--dev valid.scp
-		--trainlab tr.labels
-		--devlab cv.labels
 
   ```
+  - To train 3-layer LSTM and 7-layer SRU acoustic models:
+  ```
+	run-am.sh
+```
   
