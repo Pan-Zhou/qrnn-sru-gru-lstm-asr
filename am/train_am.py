@@ -54,7 +54,7 @@ class Model(nn.Module):
             self.rnn = MF.SRU(self.n_d, self.n_cell, self.depth,
                 dropout = args.rnn_dropout,
                 rnn_dropout = args.rnn_dropout,
-                use_tanh = 0
+                use_tanh = args.use_tanh
             )
         self.output_layer = nn.Linear(self.n_cell, self.n_V)
 
@@ -210,7 +210,7 @@ def main(args):
 
     model = Model(args)
     model.cuda()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.weight_decay)
     sys.stdout.write("num of parameters: {}\n".format(
         sum(x.numel() for x in model.parameters() if x.requires_grad)
     ))
@@ -223,7 +223,7 @@ def main(args):
     try:
         os.makedirs(save_folder)
     except OSError as e:
-        if e.errno == errno.EEXIST:
+        if os.path.exists(save_folder):
             print('Directory already exists.')
         else:
             raise
@@ -238,10 +238,13 @@ def main(args):
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
             start_epoch = 0
+    else:
+        start_epoch = 0
+
     for epoch in range(start_epoch, args.max_epoch):
         start_time = time.time()
-        if args.lr_decay_epoch>0 and epoch>=args.lr_decay_epoch:
-            args.lr *= args.lr_decay
+        #if args.lr_decay_epoch>0 and epoch>=args.lr_decay_epoch:
+        #    args.lr *= args.lr_decay
         
         train_loss,tracc = train_model(epoch, model, kaldi_io_tr, optimizer)
         
@@ -270,13 +273,20 @@ def main(args):
             unchanged = 0
             best_dev = dev_loss
             file_path = os.path.join(save_folder, args.model_path)
-            torch.save({'epoch':epoch+1,'state_dict':model.state_dict(),'optim_dict':optimizer.state_dict()}),file_path)
-            print("Find better validated model, saving to {}".format(file_path)
+            torch.save({'epoch':epoch+1,'state_dict':model.state_dict(),'optim_dict':optimizer.state_dict()},file_path)
+            print("Find better validated model, saving to {}".format(file_path))
             start_time = time.time()
             sys.stdout.flush()
         else:
             unchanged += 1
-        if unchanged >= 5: break
+            ##adjust lrate
+            if args.lr_decay_epoch >0 and epoch >=args.lr_decay_epoch:
+                optimizer.param_groups[0]['lr'] *= args.lr_decay
+                print("adjust learning rate to {:.6f}\n".format(optimizer.param_groups[0]['lr']))
+        
+        if unchanged >= 5:
+            print("dev_loss unimproved for 5 epoches,terminate training...")
+            break
         sys.stdout.write("\n")
 
 if __name__ == "__main__":
@@ -297,14 +307,12 @@ if __name__ == "__main__":
     argparser.add_argument("--feadim", type=int, default=40)
     argparser.add_argument("--hidnum", type=int, default=512)
     argparser.add_argument("--dropout", type=float, default=0.5,
-        help="dropout of word embeddings and softmax output"
-    )
+        help="dropout of word embeddings and softmax output")
     argparser.add_argument("--rnn_dropout", type=float, default=0.2,
-        help="dropout of RNN layers"
-    )
+        help="dropout of RNN layers")
+    argparser.add_argument("--use_tanh",type=int,default=1,help="sru highway gate activation")
     argparser.add_argument("--bias", type=float, default=-3,
-        help="intial bias of highway gates",
-    )
+        help="intial bias of highway gates")
     argparser.add_argument("--depth", type=int, default=2)
     argparser.add_argument("--lr", type=float, default=0.1)
     argparser.add_argument("--lr_decay", type=float, default=0.98)
