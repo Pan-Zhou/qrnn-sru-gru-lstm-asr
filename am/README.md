@@ -1,7 +1,5 @@
 
 Code used for neural acoustic modeling. 
-In the experiments, we used identity activation `--use_tanh 0` and set highway gate bias to `-3`.
-These choices are found to produce better results.
 
 ## How to run
   - Prepare feathure and label file in kaldi format
