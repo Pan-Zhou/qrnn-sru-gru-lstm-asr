@@ -238,10 +238,18 @@ def main(args):
     if args.resume:
         if os.path.isfile(args.resume):
             checkpoint = torch.load(args.resume)
-            model.load_state_dict(checkpoit['state_dict'])
-            optimizer.load_state_dict(checkpoit['optim_dict'])
-            start_epoch = checkpoit['epoch']
-            print("=> loaded checkpoint '{}' (epoch {})".format(args.resume,checkpoint['epoch']))
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optim_dict'])
+            start_epoch = checkpoint['epoch']
+            dev_loss = checkpoint['dev_loss']
+            best_dev = checkpoint['best_dev']
+            args.lr = optimizer.param_groups[0]['lr']
+            print("=> loaded checkpoint '{}', lrate {:.6f}, dev_loss {:.6f},best_dev loss {:.6f}, (epoch {})".format(
+                args.resume, args.lr, dev_loss, best_dev, checkpoint['epoch']))
+            if dev_loss >best_dev and start_epoch >=args.lr_decay_epoch:
+                args.lr *=args.lr_decay
+                optimizer.param_groups[0]['lr']=args.lr
+                print("decay lrate to {:.6f}".format(args.lr))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
             start_epoch = 0
@@ -258,11 +266,6 @@ def main(args):
         '''
         train_loss,tracc = train_model(epoch, model, kaldi_io_tr, optimizer)
         
-        #save checkpoit
-        if args.checkpoint:
-            file_path = '{}/am_{}.pth.tar'.format(save_folder, epoch + 1)
-            torch.save({'epoch':epoch+1,'state_dict':model.state_dict(),'optim_dict':optimizer.state_dict()},file_path)
-            print('Saving checkpoint model to %s' % file_path)
         cvstart_time = time.time()
         dev_loss,devacc = eval_model(epoch,model, kaldi_io_dev)
         sys.stdout.write("Epoch={}  lr={:.4f}  train_loss={:.4f}  dev_loss={:.4f}  tracc={:.4f}  validacc={:.4f}"
@@ -283,7 +286,11 @@ def main(args):
             unchanged = 0
             best_dev = dev_loss
             file_path = os.path.join(save_folder, args.model_path)
-            torch.save({'epoch':epoch+1,'state_dict':model.state_dict(),'optim_dict':optimizer.state_dict()},file_path)
+            torch.save({'epoch':epoch+1,
+                'dev_loss':dev_loss,
+                'best_dev':best_dev,
+                'state_dict':model.state_dict(),
+                'optim_dict':optimizer.state_dict()},file_path)
             print("Find better validated model, saving to {}".format(file_path))
             start_time = time.time()
             sys.stdout.flush()
@@ -293,6 +300,16 @@ def main(args):
             if args.lr_decay_epoch >0 and epoch >=args.lr_decay_epoch:
                 optimizer.param_groups[0]['lr'] *= args.lr_decay
                 print("adjust learning rate to {:.6f}\n".format(optimizer.param_groups[0]['lr']))
+        
+        #save checkpoit
+        if args.checkpoint:
+            file_path = '{}/am_{}.pth.tar'.format(save_folder, epoch + 1)
+            torch.save({'epoch':epoch+1,
+                'dev_loss':dev_loss,
+                'best_dev':best_dev,
+                'state_dict':model.state_dict(),
+                'optim_dict':optimizer.state_dict()}, file_path)
+            print('Saving checkpoint model to %s' % file_path)
         
         if unchanged >= 5:
             print("dev_loss unimproved for 5 epoches,terminate training...")
