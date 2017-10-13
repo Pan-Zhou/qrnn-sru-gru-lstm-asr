@@ -45,17 +45,25 @@ class Model(nn.Module):
         self.depth = args.depth
         self.drop = nn.Dropout(args.dropout)
         self.n_V = args.statenum
-        if args.lstm:
-            self.rnn = nn.LSTM(self.n_d, self.n_cell,
-                self.depth,
+        if args.rnn_type == 'lstm':
+            self.rnn = nn.LSTM(self.n_d, self.n_cell,self.depth,
                 dropout = args.rnn_dropout,batch_first=False
             )
-        else:
+        elif args.rnn_type == 'sru':
             self.rnn = MF.SRU(self.n_d, self.n_cell, self.depth,
                 dropout = args.rnn_dropout,
                 rnn_dropout = args.rnn_dropout,
                 use_tanh = args.use_tanh
             )
+        elif args.rnn_type == 'gru':
+            self.rnn = nn.GRU(self.n_d, self.n_cell, self.depth, 
+                    dropout=args.rnn_dropout, batch_first=False)
+        elif args.rnn_type == 'qrnn':
+            pass
+        else:
+            print("unsuported rnn type {}".format(args.rnn_type))
+            raise
+
         self.output_layer = nn.Linear(self.n_cell, self.n_V)
 
         self.init_weights()
@@ -82,7 +90,7 @@ class Model(nn.Module):
     def init_hidden(self, batch_size):
         weight = next(self.parameters()).data
         zeros = Variable(weight.new(self.depth, batch_size, self.n_cell).zero_())
-        if self.args.lstm:
+        if self.args.rnn_type == 'lstm':
             zeros1 = Variable(weight.new(self.depth,batch_size,self.n_cell).zero_())
             return (zeros, zeros1)
         else:
@@ -151,7 +159,7 @@ def train_model(epoch, model, train_reader, optimizer):
             total_frame += sum(length)
             del loss,output,predict,hidden,dx,dy
             i+=1
-            if i%10 == 0:
+            if i%100 == 0:
                 sys.stdout.write("train: time:{}, Epoch={},trbatch={},loss={:.4f},tracc={:.4f}, batchacc={:.4f}, correct={}, total={}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
                         running_acc*1.0/total_frame, float(correct)/sum(length), correct, sum(length)))
                 sys.stdout.flush()
@@ -177,7 +185,6 @@ def eval_model(epoch,model, valid_reader):
             yt=np.copy(np.transpose(label,(1,0)))
             x,y = torch.from_numpy(xt),torch.from_numpy(yt).long()
             dx, dy = Variable(x,volatile=True).cuda(),Variable(y).cuda()
-            #x, y =  Variable(torch.from_numpy(feat[:,:,:])).cuda(), Variable(torch.from_numpy(label[:,:]).long()).cuda()
             hidden = model.init_hidden(batch_size)
             hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
                 else Variable(hidden.data)
@@ -194,7 +201,7 @@ def eval_model(epoch,model, valid_reader):
             cvacc += correct
             del loss,output,predict,hidden,dx,dy
             i+=1
-            if i%10 == 0:
+            if i%50 == 0:
                 sys.stdout.write("valid: time:{}, Epoch={},cvbatch={},loss={:.4f},cvacc={:.4f}, batchacc={:.4f}, correct={}, total={}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
                         cvacc*1.0/total_frame, float(correct)/sum(length), correct, sum(length)))
                 sys.stdout.flush()
@@ -243,9 +250,12 @@ def main(args):
 
     for epoch in range(start_epoch, args.max_epoch):
         start_time = time.time()
-        #if args.lr_decay_epoch>0 and epoch>=args.lr_decay_epoch:
-        #    args.lr *= args.lr_decay
-        
+        '''
+        if args.lr_decay_epoch>0 and epoch>=args.lr_decay_epoch:
+            args.lr *= args.lr_decay
+            optimizer.param_groups[0]['lr'] = args.lr
+            print("adjust learning rate to {:.6f}\n".format(optimizer.param_groups[0]['lr']))
+        '''
         train_loss,tracc = train_model(epoch, model, kaldi_io_tr, optimizer)
         
         #save checkpoit
@@ -291,7 +301,7 @@ def main(args):
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(sys.argv[0], conflict_handler='resolve')
-    argparser.add_argument("--lstm", action="store_true")
+    argparser.add_argument("--rnn_type", type=str,required=True,help="rnn type,e.g. lstm,gru,sru,qrnn")
     argparser.add_argument("--train", type=str, required=True, help="kaldi formate train scp file")
     argparser.add_argument("--dev", type=str, required=True, help="kaldi formate dev scp file")
     argparser.add_argument("--trainlab", type=str, required=True, help="kaldi formate train lab file")
