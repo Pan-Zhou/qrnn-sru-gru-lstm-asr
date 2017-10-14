@@ -5,7 +5,6 @@ import time
 import random
 import math
 from datetime import datetime
-import numpy as np
 from more_itertools import sort_together
 
 import numpy as np
@@ -15,10 +14,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
-import cuda_functional as MF
+from rnnmodel import Model
 
 from io_func.kaldi_feat import KaldiReadIn
-from io_func import smart_open, preprocess_feature_and_label, shuffle_feature_and_label, make_context, skip_frame
 from io_func.kaldi_io_parallel import KaldiDataReadParallel
 
 def CELOSS(output,label):
@@ -35,72 +33,6 @@ def CELOSS(output,label):
     losses = mask.float().cuda().view(-1,1)*select
     loss = torch.sum(losses)/torch.sum(mask.float())
     return loss
-
-class Model(nn.Module):
-    def __init__(self, args):
-        super(Model, self).__init__()
-        self.args = args
-        self.n_d = args.feadim
-        self.n_cell=args.hidnum
-        self.depth = args.depth
-        self.drop = nn.Dropout(args.dropout)
-        self.n_V = args.statenum
-        if args.rnn_type == 'lstm':
-            self.rnn = nn.LSTM(self.n_d, self.n_cell,self.depth,
-                dropout = args.rnn_dropout,batch_first=False
-            )
-        elif args.rnn_type == 'sru':
-            self.rnn = MF.SRU(self.n_d, self.n_cell, self.depth,
-                dropout = args.rnn_dropout,
-                rnn_dropout = args.rnn_dropout,
-                use_tanh = args.use_tanh
-            )
-        elif args.rnn_type == 'gru':
-            self.rnn = nn.GRU(self.n_d, self.n_cell, self.depth, 
-                    dropout=args.rnn_dropout, batch_first=False)
-        elif args.rnn_type == 'qrnn':
-            pass
-        else:
-            print("unsuported rnn type {}".format(args.rnn_type))
-            raise
-
-        self.output_layer = nn.Linear(self.n_cell, self.n_V)
-
-        self.init_weights()
-        if not args.lstm:
-            self.rnn.set_bias(args.bias)
-
-    def init_weights(self):
-        val_range =0.05 
-        for p in self.parameters():
-            if p.dim() > 1:  # matrix
-                p.data.uniform_(-val_range, val_range)
-            else:
-                p.data.zero_()
-
-    def forward(self, x, hidden,lens):
-        ##x=pack_padded_sequence(x, lens, batch_first=True)
-        rnnout, hidden = self.rnn(x, hidden)
-        ##output,_ = pad_packed_sequence(rnnout, batch_first=True) 
-        output = self.drop(rnnout)
-        output = output.view(-1, output.size(2))
-        output = self.output_layer(output)
-        return output, hidden
-
-    def init_hidden(self, batch_size):
-        weight = next(self.parameters()).data
-        zeros = Variable(weight.new(self.depth, batch_size, self.n_cell).zero_())
-        if self.args.rnn_type == 'lstm':
-            zeros1 = Variable(weight.new(self.depth,batch_size,self.n_cell).zero_())
-            return (zeros, zeros1)
-        else:
-            return zeros
-
-    def print_pnorm(self):
-        norms = [ "{:.0f}".format(x.norm().data[0]) for x in self.parameters() ]
-        sys.stdout.write("\tp_norm: {}\n".format(
-            norms
-        ))
 
 
 def train_model(epoch, model, train_reader, optimizer):
@@ -160,8 +92,11 @@ def train_model(epoch, model, train_reader, optimizer):
             del loss,output,predict,hidden,dx,dy
             i+=1
             if i%100 == 0:
-                sys.stdout.write("train: time:{}, Epoch={},trbatch={},loss={:.4f},tracc={:.4f}, batchacc={:.4f}, correct={}, total={}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
-                        running_acc*1.0/total_frame, float(correct)/sum(length), correct, sum(length)))
+                sys.stdout.write("train: time:{}, Epoch={},trbatch={},loss={:.4f},tracc={:.4f},
+                        batchacc={:.4f}, correct={}, total={}\n".format(
+                            datetime.now(),epoch,i,total_loss/total_frame,
+                            running_acc*1.0/total_frame, 
+                            float(correct)/sum(length), correct, sum(length)))
                 sys.stdout.flush()
 
     return total_loss/total_frame,running_acc*1.0/total_frame
@@ -202,22 +137,27 @@ def eval_model(epoch,model, valid_reader):
             del loss,output,predict,hidden,dx,dy
             i+=1
             if i%50 == 0:
-                sys.stdout.write("valid: time:{}, Epoch={},cvbatch={},loss={:.4f},cvacc={:.4f}, batchacc={:.4f}, correct={}, total={}\n".format(datetime.now(),epoch,i,total_loss/total_frame,\
+                sys.stdout.write("valid: time:{}, Epoch={},cvbatch={},loss={:.4f},cvacc={:.4f}, 
+                        batchacc={:.4f}, correct={}, total={}\n".format(
+                            datetime.now(),epoch,i,total_loss/total_frame,
                         cvacc*1.0/total_frame, float(correct)/sum(length), correct, sum(length)))
                 sys.stdout.flush()
     avg_loss = total_loss / total_frame
     return avg_loss,cvacc*1.0/total_frame
 
 def main(args):
-    train_read_opts={'label':args.trainlab,'lcxt':args.lcxt,'rcxt':args.rcxt,'num_streams':args.batch_size,'skip_frame':args.skipframe}
-    dev_read_opts={'label':args.devlab,'lcxt':args.lcxt,'rcxt':args.rcxt,'num_streams':args.batch_size,'skip_frame':args.skipframe}
+    train_read_opts={'label':args.trainlab,'lcxt':args.lcxt,'rcxt':args.rcxt,
+            'num_streams':args.batch_size,'skip_frame':args.skipframe}
+    dev_read_opts={'label':args.devlab,'lcxt':args.lcxt,'rcxt':args.rcxt,
+            'num_streams':args.batch_size,'skip_frame':args.skipframe}
 
     kaldi_io_tr=KaldiDataReadParallel(args.train,train_read_opts)
     kaldi_io_dev=KaldiDataReadParallel(args.dev,dev_read_opts)
 
     model = Model(args)
     model.cuda()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.weight_decay)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), 
+            eps=1e-08, weight_decay=args.weight_decay)
     sys.stdout.write("num of parameters: {}\n".format(
         sum(x.numel() for x in model.parameters() if x.requires_grad)
     ))
@@ -244,8 +184,8 @@ def main(args):
             dev_loss = checkpoint['dev_loss']
             best_dev = checkpoint['best_dev']
             args.lr = optimizer.param_groups[0]['lr']
-            print("=> loaded checkpoint '{}', lrate {:.6f}, dev_loss {:.6f},best_dev loss {:.6f}, (epoch {})".format(
-                args.resume, args.lr, dev_loss, best_dev, checkpoint['epoch']))
+            print("=> loaded checkpoint '{}', lrate {:.6f}, dev_loss {:.6f},best_dev loss {:.6f},
+                    (epoch {})".format(args.resume, args.lr, dev_loss, best_dev, checkpoint['epoch']))
             if dev_loss >best_dev and start_epoch >=args.lr_decay_epoch:
                 args.lr *=args.lr_decay
                 optimizer.param_groups[0]['lr']=args.lr
@@ -268,8 +208,8 @@ def main(args):
         
         cvstart_time = time.time()
         dev_loss,devacc = eval_model(epoch,model, kaldi_io_dev)
-        sys.stdout.write("Epoch={}  lr={:.4f}  train_loss={:.4f}  dev_loss={:.4f}  tracc={:.4f}  validacc={:.4f}"
-                "\t[{:.4f}m]\t[{:.4f}m]\n".format(
+        sys.stdout.write("Epoch={}  lr={:.4f}  train_loss={:.4f}  dev_loss={:.4f}  tracc={:.4f}  
+                validacc={:.4f}\t[{:.4f}m]\t[{:.4f}m]\n".format(
             epoch,
             args.lr,
             train_loss,
