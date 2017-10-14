@@ -128,7 +128,7 @@ def train_model(epoch, model, train_reader, optimizer):
             x,y = torch.from_numpy(xt),torch.from_numpy(yt).long()
             dx, dy = Variable(x).cuda(),Variable(y).cuda()
             hidden = model.init_hidden(batch_size)
-            hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
+            hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.rnn_type=='lstm' \
                 else Variable(hidden.data)
 
             output, hidden = model(dx, hidden,length)
@@ -186,7 +186,7 @@ def eval_model(epoch,model, valid_reader):
             x,y = torch.from_numpy(xt),torch.from_numpy(yt).long()
             dx, dy = Variable(x,volatile=True).cuda(),Variable(y).cuda()
             hidden = model.init_hidden(batch_size)
-            hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.lstm \
+            hidden = (Variable(hidden[0].data), Variable(hidden[1].data)) if args.rnn_type=='lstm' \
                 else Variable(hidden.data)
 
             output, hidden = model(dx, hidden,length)
