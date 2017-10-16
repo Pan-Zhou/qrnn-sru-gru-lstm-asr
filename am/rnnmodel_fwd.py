@@ -19,13 +19,13 @@ def main(args):
     model = Model(args)
     model.cuda()
     
-    model.load_state_dict(torch.olad(args.model)['state_dict'])
+    model.load_state_dict(torch.lolad(args.model)['state_dict'])
     model.eval()
-    kaldi_io_dev.initialize_read(True)
+    kaldi_io_infeat.initialize_read(True)
     batch_size = 1
     i = 0
     while True:
-        utt_id,utt_mat = kaldi_io_dev.read_next_utt()###utt_mat.shape: T x D
+        utt_id,utt_mat = kaldi_io_infeat.read_next_utt()###utt_mat.shape: T x D
         if utt_mat is None:
             break
         else:
@@ -38,11 +38,12 @@ def main(args):
 
             if args.apply_logsoftmax:
                 output = nn.LogSoftmax()(output)
-            kaldi_io_outfeat(uttid,output)
+            kaldi_io_outfeat.write_kaldi_mat(uttid,output)
             i += 1
         if i%100 ==0
             print("processed {} utterance".format(i))
 
+    kaldi_io_outfeat.close()
 
 
 if __name__ == "__main__":
