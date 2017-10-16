@@ -58,6 +58,9 @@ if __name__ == "__main__":
     argparser.add_argument("--dropout", type=float, default= 0.0,help="dropout probability")
     argparser.add_argument("--hidnum", type=int, default=512, help="nodes of hidden layers")
     argparser.add_argument("--bias", type = float, default=0.0, help="bias value of sru highway")
+    argparser.add_argument("--rnn_dropout", type=float, default=0.2,
+        help="dropout of RNN layers")
+    argparser.add_argument("--use_tanh",type=int,default=1,help="sru highway gate activation")
     argparser.add_argument("--apply_logsoftmax", action="store_true",help="output logsoftmax of posterior")
     args = argparser.parse_args()
     print(args)
