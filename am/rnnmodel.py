@@ -34,7 +34,7 @@ class Model(nn.Module):
         self.output_layer = nn.Linear(self.n_cell, self.n_V)
 
         self.init_weights()
-        if not args.lstm:
+        if  args.rnn_type == 'sru':
             self.rnn.set_bias(args.bias)
 
     def init_weights(self):
