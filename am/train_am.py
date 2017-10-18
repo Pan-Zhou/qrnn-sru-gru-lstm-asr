@@ -27,8 +27,8 @@ def CELOSS(output,label,delay = 0):
     return: masked average ce loss
     """
     if delay > 0:
-        label[delay:,:] = label[0:-delay,:]
-        label[0:delay, :] = -1
+        label.data[delay:,:] = label.data[0:-delay,:]
+        label.data[0:delay, :] = -1
     _,predict = torch.max(output,1)
     correct = (predict.data == label.view(-1).data).sum()
 
