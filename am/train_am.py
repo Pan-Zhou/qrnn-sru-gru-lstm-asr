@@ -19,20 +19,28 @@ from rnnmodel import Model
 from io_func.kaldi_feat import KaldiReadIn
 from io_func.kaldi_io_parallel import KaldiDataReadParallel
 
-def CELOSS(output,label):
+def CELOSS(output,label,delay = 0):
     """
     compute cross entropy loss with net output and label
     ouput: linear before softmax,(N*T, dim) tensor
     label: (T,N) tensor, with -1 padded for padding frames
     return: masked average ce loss
     """
+    if delay > 0:
+        label[delay:,:] = label[0:-delay,:]
+        label[0:delay, :] = -1
+    _,predict = torch.max(output,1)
+    correct = (predict.data == label.reshape(-1).data).sum()
+
+    #correct = np.sum(predict_data == yt.reshape(-1))
+    
     mask = (label>=0)
     output =F.log_softmax(output)
     labselect = label + (label<0).long()
     select = -torch.gather(output,1,labselect.view(-1,1))
     losses = mask.float().cuda().view(-1,1)*select
     loss = torch.sum(losses)/torch.sum(mask.float())
-    return loss
+    return loss, correct
 
 
 def train_model(epoch, model, train_reader, optimizer):
@@ -42,6 +50,7 @@ def train_model(epoch, model, train_reader, optimizer):
     train_reader.initialize_read(True)
     batch_size = args.batch_size
     lr = args.lr
+    delay = args.target_delay
 
     total_loss = 0.0
     hidden = model.init_hidden(batch_size)
@@ -64,12 +73,9 @@ def train_model(epoch, model, train_reader, optimizer):
                 else Variable(hidden.data)
 
             output, hidden = model(dx, hidden,length)
-            _,predict = torch.max(output,1)
-            predict_data = ((predict.data).cpu().numpy())
-            correct = np.sum(predict_data == yt.reshape(-1))
             
             optimizer.zero_grad()
-            loss= CELOSS(output,dy)
+            loss, correct = CELOSS(output,dy,delay)
             loss.backward()
             optimizer.step()
 
@@ -86,6 +92,7 @@ def train_model(epoch, model, train_reader, optimizer):
                 sys.exit(0)
                 return
 
+            length -= delay
             total_loss += loss.data[0] * sum(length) 
             running_acc += correct
             total_frame += sum(length)
@@ -106,6 +113,7 @@ def eval_model(epoch,model, valid_reader):
     args = model.args
     valid_reader.initialize_read(True)
     batch_size = args.batch_size
+    delay = args.target_delay
     total_loss = 0.0
     hidden = model.init_hidden(batch_size)
     i=0
@@ -125,12 +133,10 @@ def eval_model(epoch,model, valid_reader):
                 else Variable(hidden.data)
 
             output, hidden = model(dx, hidden,length)
-            _,predict = torch.max(output,1)
-            predict_data = ((predict.data).cpu().numpy())
-            correct = np.sum(predict_data == yt.reshape(-1))
             
-            loss = CELOSS(output,dy)
+            loss, correct = CELOSS(output, dy, delay)
             
+            length -= delay
             total_frame+= sum(length)
             total_loss += loss.data[0]*sum(length)
             cvacc += correct
@@ -270,6 +276,7 @@ if __name__ == "__main__":
 
     argparser.add_argument("--batch_size", "--batch", type=int, default=32)
     argparser.add_argument("--unroll_size", type=int, default=35)
+    argparser.add_argument("--target_delay", type=int, default=0)
     argparser.add_argument("--max_epoch", type=int, default=300)
     argparser.add_argument("--feadim", type=int, default=40)
     argparser.add_argument("--hidnum", type=int, default=512)
