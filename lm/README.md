@@ -9,7 +9,7 @@ These choices are found to produce better results.
   - Make sure CUDA library path and `cuda_functional.py` is available to python. For example,
   ```python
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64
-    export PYTHONPATH=../../sru/
+    export PYTHONPATH=../sru/
   ```
   
   - Run **train_lm.py** and get the results.
