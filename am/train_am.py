@@ -30,7 +30,7 @@ def CELOSS(output,label,delay = 0):
         label[delay:,:] = label[0:-delay,:]
         label[0:delay, :] = -1
     _,predict = torch.max(output,1)
-    correct = (predict.data == label.reshape(-1).data).sum()
+    correct = (predict.data == label.view(-1).data).sum()
 
     #correct = np.sum(predict_data == yt.reshape(-1))
     
@@ -96,7 +96,7 @@ def train_model(epoch, model, train_reader, optimizer):
             total_loss += loss.data[0] * sum(length) 
             running_acc += correct
             total_frame += sum(length)
-            del loss,output,predict,hidden,dx,dy
+            del loss,output,hidden,dx,dy
             i+=1
             if i%100 == 0:
                 sys.stdout.write("train: time:{}, Epoch={},trbatch={},loss={:.4f},tracc={:.4f},
@@ -140,7 +140,7 @@ def eval_model(epoch,model, valid_reader):
             total_frame+= sum(length)
             total_loss += loss.data[0]*sum(length)
             cvacc += correct
-            del loss,output,predict,hidden,dx,dy
+            del loss,output,hidden,dx,dy
             i+=1
             if i%50 == 0:
                 sys.stdout.write("valid: time:{}, Epoch={},cvbatch={},loss={:.4f},cvacc={:.4f}, 
